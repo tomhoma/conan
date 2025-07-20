@@ -1,0 +1,66 @@
+[package]
+name = "gosearch"
+version = "1.0.0"
+edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+description = "A tool for searching usernames across various websites and checking for compromised credentials"
+license = "MIT"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.42", features = ["full"] }
+
+# HTTP client with async support
+reqwest = { version = "0.12", features = ["json", "gzip", "deflate", "brotli", "cookies", "rustls-tls"] }
+
+# JSON serialization/deserialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# CLI argument parsing
+clap = { version = "4.5", features = ["derive"] }
+
+# Terminal colors and formatting
+colored = "2.1"
+comfy-table = "7.1"
+crossterm = "0.28"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2.0"
+
+# Async traits
+async-trait = "0.1"
+
+# Time handling
+chrono = "0.4"
+
+# Concurrent programming utilities
+futures = "0.3"
+rayon = "1.10"
+
+# URL manipulation
+url = "2.5"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# File operations
+tokio-fs = "0.1"
+
+# Regular expressions
+regex = "1.11"
+
+# Base64 encoding
+base64 = "0.22"
+
+[dev-dependencies]
+mockito = "1.6"
+tokio-test = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
