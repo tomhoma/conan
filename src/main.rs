@@ -345,13 +345,19 @@ async fn check_by_status_code(
     match timeout(Duration::from_secs(30), request.send()).await {
         Ok(Ok(response)) => {
             if response.status().as_u16() < 400 {
-                if let Some(error_code) = website.error_code {
-                    if response.status().as_u16() != error_code {
-                        let display_url = build_url(&website.base_url, username);
-                        println!("{} {} {}", "[+]".green(), website.name, display_url);
-                        write_to_file(username, &format!("{}\n", display_url), file_mutex)?;
-                        PROFILE_COUNT.fetch_add(1, Ordering::Relaxed);
-                    }
+                let should_mark_found = if let Some(error_code) = website.error_code {
+                    // If error_code is defined, profile exists if status != error_code
+                    response.status().as_u16() != error_code
+                } else {
+                    // If no error_code is defined, any successful response means profile exists
+                    true
+                };
+                
+                if should_mark_found {
+                    let display_url = build_url(&website.base_url, username);
+                    println!("{} {} {}", "[+]".green(), website.name, display_url);
+                    write_to_file(username, &format!("{}\n", display_url), file_mutex)?;
+                    PROFILE_COUNT.fetch_add(1, Ordering::Relaxed);
                 }
             }
         }
