@@ -3,7 +3,8 @@ use chrono::{DateTime, Utc};
 use clap::Parser;
 use colored::*;
 use comfy_table::{Table, Cell, Attribute};
-use futures::future::join_all;
+use futures::stream::{FuturesUnordered, StreamExt};
+use once_cell::sync::Lazy;
 use reqwest::{Client, StatusCode, header::USER_AGENT};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
@@ -11,7 +12,11 @@ use std::io::Write;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tokio::sync::Semaphore;
 use tokio::time::timeout;
+
+// Import models from the models module
+use conan::models::*;
 
 const ASCII_LOGO: &str = r#"
  ________   ________   ________    ________   ________      
@@ -26,8 +31,38 @@ const ASCII_LOGO: &str = r#"
 
 const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 const VERSION: &str = "v1.0.0";
+const MAX_CONCURRENT_REQUESTS: usize = 50; // Tunable based on testing
 
 static PROFILE_COUNT: AtomicU32 = AtomicU32::new(0);
+
+// Global HTTP client with connection pooling
+static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
+    Client::builder()
+        .pool_idle_timeout(Duration::from_secs(90))
+        .pool_max_idle_per_host(10)
+        .timeout(Duration::from_secs(30)) // Reduced from 120s
+        .gzip(true)
+        .brotli(true)
+        .deflate(true)
+        .danger_accept_invalid_certs(false)
+        .build()
+        .expect("Failed to create HTTP client")
+});
+
+// HTTP client without redirects
+static HTTP_CLIENT_NO_REDIRECT: Lazy<Client> = Lazy::new(|| {
+    Client::builder()
+        .pool_idle_timeout(Duration::from_secs(90))
+        .pool_max_idle_per_host(10)
+        .timeout(Duration::from_secs(30))
+        .gzip(true)
+        .brotli(true)
+        .deflate(true)
+        .danger_accept_invalid_certs(false)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .expect("Failed to create HTTP client with no redirect")
+});
 
 #[derive(Parser, Debug)]
 #[command(name = "conan")]
@@ -49,70 +84,6 @@ struct Args {
     /// Username as positional argument
     #[arg(index = 1)]
     positional_username: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct Website {
-    name: String,
-    base_url: String,
-    #[serde(rename = "url_probe")]
-    url_probe: Option<String>,
-    follow_redirects: bool,
-    user_agent: Option<String>,
-    #[serde(rename = "errorType")]
-    error_type: String,
-    #[serde(rename = "errorMsg")]
-    error_msg: Option<String>,
-    #[serde(rename = "errorCode")]
-    error_code: Option<u16>,
-    response_url: Option<String>,
-    cookies: Option<Vec<Cookie>>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct Cookie {
-    name: String,
-    value: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Data {
-    websites: Vec<Website>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Stealer {
-    total_corporate_services: i32,
-    total_user_services: i32,
-    date_compromised: String,
-    stealer_family: String,
-    computer_name: String,
-    operating_system: String,
-    malware_path: String,
-    antiviruses: serde_json::Value,
-    ip: String,
-    top_passwords: Vec<String>,
-    top_logins: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct HudsonRockResponse {
-    message: String,
-    stealers: Vec<Stealer>,
-}
-
-#[derive(Debug, Deserialize)]
-struct WeakpassResponse {
-    #[serde(rename = "type")]
-    hash_type: String,
-    hash: String,
-    pass: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ProxyNova {
-    count: i32,
-    lines: Vec<String>,
 }
 
 #[tokio::main]
@@ -162,32 +133,10 @@ async fn main() -> Result<()> {
     
     let start = Instant::now();
     
-    // Create HTTP client
-    let client = match create_http_client() {
-        Ok(client) => client,
-        Err(e) => {
-            eprintln!("{} {}", "Error creating HTTP client:".red(), e);
-            std::process::exit(1);
-        }
-    };
     let file_mutex = Arc::new(Mutex::new(()));
     
-    // Search websites concurrently
-    let search_tasks: Vec<_> = data.websites.iter()
-        .map(|website| {
-            let website = website.clone();
-            let username = username.clone();
-            let client = client.clone();
-            let file_mutex = file_mutex.clone();
-            let no_false_positives = args.no_false_positives;
-            
-            tokio::spawn(async move {
-                search_website(&website, &username, &client, &file_mutex, no_false_positives).await
-            })
-        })
-        .collect();
-    
-    join_all(search_tasks).await;
+    // Search websites with smart batching
+    search_websites_batched(&username, data.websites, &file_mutex, args.no_false_positives).await;
     
     println!("\n");
     
@@ -196,14 +145,14 @@ async fn main() -> Result<()> {
         eprintln!("{} {}", "Error writing to file:".red(), e);
     }
     println!("{}", "[*] Searching HudsonRock's Cybercrime Intelligence Database...".yellow());
-    if let Err(e) = hudson_rock_search(&username, &client, &file_mutex).await {
+    if let Err(e) = hudson_rock_search(&username, &file_mutex).await {
         eprintln!("{} {}", "Error searching HudsonRock:".red(), e);
     }
     
     // Search Breach Directory if API key provided
     if let Some(api_key) = args.breach_directory_api_key {
         println!("\n");
-        if let Err(e) = search_breach_directory(&username, &api_key, &client, &file_mutex).await {
+        if let Err(e) = search_breach_directory(&username, &api_key, &file_mutex).await {
             eprintln!("{} {}", "Error searching Breach Directory:".red(), e);
         }
     }
@@ -214,7 +163,7 @@ async fn main() -> Result<()> {
     if let Err(e) = write_to_file(&username, &"⎯".repeat(85), &file_mutex) {
         eprintln!("{} {}", "Error writing to file:".red(), e);
     }
-    if let Err(e) = search_proxy_nova(&username, &client, &file_mutex).await {
+    if let Err(e) = search_proxy_nova(&username, &file_mutex).await {
         eprintln!("{} {}", "Error searching ProxyNova:".red(), e);
     }
     
@@ -222,7 +171,7 @@ async fn main() -> Result<()> {
     
     // Search domains
     let domains = build_domains(&username);
-    if let Err(e) = search_domains(&username, domains, &client, &file_mutex).await {
+    if let Err(e) = search_domains(&username, domains, &file_mutex).await {
         eprintln!("{} {}", "Error searching domains:".red(), e);
     }
     
@@ -254,7 +203,7 @@ async fn main() -> Result<()> {
 
 async fn load_website_data() -> Result<Data> {
     let url = "https://raw.githubusercontent.com/ibnaleem/gosearch/refs/heads/main/data.json";
-    let response = reqwest::get(url).await?;
+    let response = HTTP_CLIENT.get(url).send().await?;
     
     if !response.status().is_success() {
         anyhow::bail!("Failed to download data.json, status code: {}", response.status());
@@ -264,33 +213,39 @@ async fn load_website_data() -> Result<Data> {
     Ok(data)
 }
 
-fn create_http_client() -> Result<Client> {
-    Client::builder()
-        .timeout(Duration::from_secs(120))
-        .gzip(true)
-        .brotli(true)
-        .deflate(true)
-        .danger_accept_invalid_certs(false)
-        .build()
-        .context("Failed to create HTTP client")
+// New function: Smart batching with semaphore
+async fn search_websites_batched(
+    username: &str,
+    websites: Vec<Website>,
+    file_mutex: &Arc<Mutex<()>>,
+    no_false_positives: bool,
+) {
+    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_REQUESTS));
+    let mut futures = FuturesUnordered::new();
+    
+    for website in websites {
+        let permit = semaphore.clone();
+        let username = username.to_string();
+        let file_mutex = file_mutex.clone();
+        
+        futures.push(tokio::spawn(async move {
+            let _permit = permit.acquire_owned().await.unwrap();
+            search_website_optimized(&website, &username, &file_mutex, no_false_positives).await
+        }));
+    }
+    
+    // Process results as they complete
+    while let Some(result) = futures.next().await {
+        if let Err(e) = result {
+            eprintln!("Task error: {}", e);
+        }
+    }
 }
 
-fn create_http_client_no_redirect() -> Result<Client> {
-    Client::builder()
-        .timeout(Duration::from_secs(120))
-        .gzip(true)
-        .brotli(true)
-        .deflate(true)
-        .danger_accept_invalid_certs(false)
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .context("Failed to create HTTP client with no redirect")
-}
-
-async fn search_website(
+// Optimized search function with response streaming
+async fn search_website_optimized(
     website: &Website,
     username: &str,
-    client: &Client,
     file_mutex: &Arc<Mutex<()>>,
     no_false_positives: bool,
 ) -> Result<()> {
@@ -302,16 +257,16 @@ async fn search_website(
     
     match website.error_type.as_str() {
         "status_code" => {
-            check_by_status_code(website, &url, username, client, file_mutex).await?;
+            check_by_status_code_optimized(website, &url, username, file_mutex).await?;
         }
         "errorMsg" => {
-            check_by_error_msg(website, &url, username, client, file_mutex).await?;
+            check_by_error_msg_optimized(website, &url, username, file_mutex).await?;
         }
         "profilePresence" => {
-            check_by_profile_presence(website, &url, username, client, file_mutex).await?;
+            check_by_profile_presence(website, &url, username, file_mutex).await?;
         }
         "response_url" => {
-            check_by_response_url(website, &url, username, client, file_mutex).await?;
+            check_by_response_url(website, &url, username, file_mutex).await?;
         }
         _ => {
             if !no_false_positives {
@@ -326,30 +281,29 @@ async fn search_website(
     Ok(())
 }
 
-async fn check_by_status_code(
+// Optimized status code check - uses HEAD request when possible
+async fn check_by_status_code_optimized(
     website: &Website,
     url: &str,
     username: &str,
-    client: &Client,
     file_mutex: &Arc<Mutex<()>>,
 ) -> Result<()> {
-    let client_to_use = if !website.follow_redirects {
-        create_http_client_no_redirect()?
+    let client = if !website.follow_redirects {
+        &HTTP_CLIENT_NO_REDIRECT
     } else {
-        client.clone()
+        &HTTP_CLIENT
     };
     
-    let request = client_to_use.get(url);
+    // Use HEAD request for status_code checks to save bandwidth
+    let request = client.head(url);
     let request = add_headers_and_cookies(request, website);
     
-    match timeout(Duration::from_secs(30), request.send()).await {
+    match timeout(Duration::from_secs(15), request.send()).await {
         Ok(Ok(response)) => {
             if response.status().as_u16() < 400 {
                 let should_mark_found = if let Some(error_code) = website.error_code {
-                    // If error_code is defined, profile exists if status != error_code
                     response.status().as_u16() != error_code
                 } else {
-                    // If no error_code is defined, any successful response means profile exists
                     true
                 };
                 
@@ -367,28 +321,49 @@ async fn check_by_status_code(
     Ok(())
 }
 
-async fn check_by_error_msg(
+// Optimized error message check with streaming
+async fn check_by_error_msg_optimized(
     website: &Website,
     url: &str,
     username: &str,
-    client: &Client,
     file_mutex: &Arc<Mutex<()>>,
 ) -> Result<()> {
-    let client_to_use = if !website.follow_redirects {
-        create_http_client_no_redirect()?
+    let client = if !website.follow_redirects {
+        &HTTP_CLIENT_NO_REDIRECT
     } else {
-        client.clone()
+        &HTTP_CLIENT
     };
     
-    let request = client_to_use.get(url);
+    let request = client.get(url);
     let request = add_headers_and_cookies(request, website);
     
-    match timeout(Duration::from_secs(30), request.send()).await {
-        Ok(Ok(response)) => {
+    match timeout(Duration::from_secs(15), request.send()).await {
+        Ok(Ok(mut response)) => {
             if response.status().as_u16() < 400 {
                 if let Some(error_msg) = &website.error_msg {
-                    let body = response.text().await.unwrap_or_default();
-                    if !body.contains(error_msg) {
+                    // Stream response and check for error message early
+                    let mut buffer = Vec::with_capacity(8192);
+                    let mut found_error = false;
+                    
+                    while let Ok(Some(chunk)) = response.chunk().await {
+                        buffer.extend_from_slice(&chunk);
+                        
+                        // Try to convert to string and check for error message
+                        if let Ok(text) = std::str::from_utf8(&buffer) {
+                            if text.contains(error_msg) {
+                                found_error = true;
+                                break;
+                            }
+                        }
+                        
+                        // Stop reading after 64KB to avoid downloading huge pages
+                        if buffer.len() > 65536 {
+                            break;
+                        }
+                    }
+                    
+                    // If we didn't find the error message, the profile exists
+                    if !found_error {
                         let display_url = build_url(&website.base_url, username);
                         println!("{} {} {}", "[+]".green(), website.name, display_url);
                         write_to_file(username, &format!("{}\n", display_url), file_mutex)?;
@@ -403,23 +378,23 @@ async fn check_by_error_msg(
     Ok(())
 }
 
+// Keep existing check_by_profile_presence function
 async fn check_by_profile_presence(
     website: &Website,
     url: &str,
     username: &str,
-    client: &Client,
     file_mutex: &Arc<Mutex<()>>,
 ) -> Result<()> {
-    let client_to_use = if !website.follow_redirects {
-        create_http_client_no_redirect()?
+    let client = if !website.follow_redirects {
+        &HTTP_CLIENT_NO_REDIRECT
     } else {
-        client.clone()
+        &HTTP_CLIENT
     };
     
-    let request = client_to_use.get(url);
+    let request = client.get(url);
     let request = add_headers_and_cookies(request, website);
     
-    match timeout(Duration::from_secs(30), request.send()).await {
+    match timeout(Duration::from_secs(15), request.send()).await {
         Ok(Ok(response)) => {
             if response.status().as_u16() < 400 {
                 if let Some(error_msg) = &website.error_msg {
@@ -438,23 +413,23 @@ async fn check_by_profile_presence(
     Ok(())
 }
 
+// Keep existing check_by_response_url function
 async fn check_by_response_url(
     website: &Website,
     url: &str,
     username: &str,
-    client: &Client,
     file_mutex: &Arc<Mutex<()>>,
 ) -> Result<()> {
-    let client_to_use = if !website.follow_redirects {
-        create_http_client_no_redirect()?
+    let client = if !website.follow_redirects {
+        &HTTP_CLIENT_NO_REDIRECT
     } else {
-        client.clone()
+        &HTTP_CLIENT
     };
     
-    let request = client_to_use.get(url);
+    let request = client.get(url);
     let request = add_headers_and_cookies(request, website);
     
-    match timeout(Duration::from_secs(30), request.send()).await {
+    match timeout(Duration::from_secs(15), request.send()).await {
         Ok(Ok(response)) => {
             if response.status().as_u16() < 400 {
                 if let Some(response_url_template) = &website.response_url {
@@ -478,12 +453,11 @@ async fn check_by_response_url(
 
 async fn hudson_rock_search(
     username: &str,
-    client: &Client,
     file_mutex: &Arc<Mutex<()>>,
 ) -> Result<()> {
     let url = format!("https://cavalier.hudsonrock.com/api/json/v2/osint-tools/search-by-username?username={}", username);
     
-    match client.get(&url).send().await {
+    match HTTP_CLIENT.get(&url).send().await {
         Ok(response) => {
             let hudson_response: HudsonRockResponse = response.json().await?;
             
@@ -546,19 +520,16 @@ async fn hudson_rock_search(
 
 async fn search_proxy_nova(
     username: &str,
-    client: &Client,
     file_mutex: &Arc<Mutex<()>>,
 ) -> Result<()> {
     println!("{}", format!("[*] Searching {} on ProxyNova for any compromised passwords...", username).yellow());
     
     let url = format!("https://api.proxynova.com/comb?query={}", username);
     
-    match client.get(&url).send().await {
+    match HTTP_CLIENT.get(&url).send().await {
         Ok(response) => {
-            // Get the response text first
             match response.text().await {
                 Ok(text) => {
-                    // First try to parse as ProxyNova struct
                     match serde_json::from_str::<ProxyNova>(&text) {
                         Ok(proxy_nova) => {
                             if proxy_nova.count > 0 {
@@ -585,7 +556,6 @@ async fn search_proxy_nova(
                             }
                         }
                         Err(_) => {
-                            // If parsing as ProxyNova fails, try to parse as raw JSON to see the structure
                             match serde_json::from_str::<serde_json::Value>(&text) {
                                 Ok(json_value) => {
                                     println!("{}", "[-] ProxyNova API response format has changed or no results found".red());
@@ -615,13 +585,9 @@ async fn search_proxy_nova(
 async fn search_breach_directory(
     username: &str,
     _api_key: &str,
-    _client: &Client,
     _file_mutex: &Arc<Mutex<()>>,
 ) -> Result<()> {
     println!("{}", format!("[*] Searching {} on Breach Directory for any compromised passwords...", username).yellow());
-    
-    // Note: This is a placeholder as the gobreach library would need to be reimplemented
-    // You would need to implement the actual Breach Directory API client
     println!("{}", "[-] Breach Directory search not yet implemented in Rust version".red());
     
     Ok(())
@@ -643,7 +609,6 @@ fn build_domains(username: &str) -> Vec<String> {
 async fn search_domains(
     username: &str,
     domains: Vec<String>,
-    client: &Client,
     file_mutex: &Arc<Mutex<()>>,
 ) -> Result<()> {
     println!("{}", format!("[*] Searching {} domains with the username {}...", domains.len(), username).yellow());
@@ -652,31 +617,31 @@ async fn search_domains(
     let mut table = Table::new();
     table.set_header(vec!["NO", "DOMAIN", "STATUS"]);
     
-    let search_tasks: Vec<_> = domains.iter()
-        .map(|domain| {
-            let domain = domain.clone();
-            let client = client.clone();
-            
-            tokio::spawn(async move {
-                let url = format!("http://{}", domain);
-                match timeout(Duration::from_secs(10), client.get(&url).send()).await {
-                    Ok(Ok(response)) => {
-                        if response.status() == StatusCode::OK {
-                            Some((domain, response.status()))
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                }
-            })
-        })
-        .collect();
+    let semaphore = Arc::new(Semaphore::new(20)); // Limit concurrent domain checks
+    let mut futures = FuturesUnordered::new();
     
-    let results = join_all(search_tasks).await;
+    for domain in domains {
+        let permit = semaphore.clone();
+        let domain = domain.clone();
+        
+        futures.push(tokio::spawn(async move {
+            let _permit = permit.acquire_owned().await.unwrap();
+            let url = format!("http://{}", domain);
+            match timeout(Duration::from_secs(10), HTTP_CLIENT.get(&url).send()).await {
+                Ok(Ok(response)) => {
+                    if response.status() == StatusCode::OK {
+                        Some((domain, response.status()))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        }));
+    }
     
     let mut row_num = 0;
-    for result in results {
+    while let Some(result) = futures.next().await {
         if let Ok(Some((domain, status))) = result {
             row_num += 1;
             table.add_row(vec![
