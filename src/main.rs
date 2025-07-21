@@ -629,18 +629,29 @@ async fn search_breach_directory(
 ) -> Result<()> {
     println!("{}", format!("[*] Searching {} on Breach Directory for any compromised passwords...", username).yellow());
     
-    // Construct API URL - using a common pattern for breach directory APIs
-    let url = format!("https://breachdirectory.org/api/search?username={}&api_key={}", username, api_key);
+    // Construct API URL for RapidAPI Breach Directory
+    let url = format!("https://breachdirectory.p.rapidapi.com/?func=auto&term={}", username);
     
-    match HTTP_CLIENT.get(&url).send().await {
-        Ok(response) => {
+    let request = HTTP_CLIENT.get(&url)
+        .header("x-rapidapi-key", api_key)
+        .header("x-rapidapi-host", "breachdirectory.p.rapidapi.com")
+        .header("User-Agent", DEFAULT_USER_AGENT);
+    
+    match timeout(Duration::from_secs(30), request.send()).await {
+        Ok(Ok(response)) => {
             if !response.status().is_success() {
                 println!("{}", format!("[-] API request failed with status: {}", response.status()).red());
                 return Ok(());
             }
             
+            // Parse JSON response and properly handle breach data
             match response.json::<BreachDirectoryResponse>().await {
                 Ok(breach_response) => {
+                    if !breach_response.success {
+                        println!("{}", format!("[-] Breach Directory API returned error").red());
+                        return Ok(());
+                    }
+                    
                     if breach_response.found == 0 {
                         println!("{}", format!("[-] No breaches found for {}.", username).red());
                         write_to_file(username, &format!("[-] No breaches found on Breach Directory for: {}", username), file_mutex)?;
@@ -660,12 +671,18 @@ async fn search_breach_directory(
                     for (i, entry) in breach_response.result.iter().enumerate() {
                         let mut cracked_password = String::new();
                         
+                        // *** THIS IS WHERE crack_hash IS CALLED ***
                         // Attempt to crack hash if available
                         if let Some(hash) = &entry.hash {
                             if !hash.is_empty() {
-                                if let Ok(pass) = crack_hash(hash).await {
-                                    if !pass.is_empty() {
+                                println!("{}", format!("[*] Attempting to crack hash: {}...", &hash[..8.min(hash.len())]).yellow());
+                                match crack_hash(hash).await {
+                                    Ok(pass) if !pass.is_empty() => {
                                         cracked_password = pass;
+                                        println!("{}", format!("[+] Hash cracked successfully!").green());
+                                    }
+                                    _ => {
+                                        println!("{}", format!("[-] Unable to crack hash").red());
                                     }
                                 }
                             }
@@ -706,8 +723,11 @@ async fn search_breach_directory(
                 }
             }
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             println!("{}", format!("[-] Error searching Breach Directory: {}", e).red());
+        }
+        Err(_) => {
+            println!("{}", format!("[-] Breach Directory request timed out").red());
         }
     }
     

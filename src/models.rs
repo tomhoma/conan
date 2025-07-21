@@ -67,6 +67,7 @@ pub struct ProxyNova {
 // Breach Directory related structures
 #[derive(Debug, Deserialize)]
 pub struct BreachDirectoryResponse {
+    pub success: bool,
     pub found: i32,
     pub result: Vec<BreachEntry>,
 }
