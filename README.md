@@ -30,18 +30,20 @@ This project is licensed under the GNU General Public License v3.0 - see the [LI
 - Rust 1.70 or higher + Cargo
 https://www.rust-lang.org/tools/install
 
-### Install build from Source
-```cargo install --git https://github.com/tomhoma/conan.git```
+### Install from Source
+```bash
+cargo install --git https://github.com/tomhoma/conan.git
+```
 
 ### Build from Source
 
 ```bash
-git clone https://github.com/yourusername/gosearch-rust
-cd gosearch-rust
+git clone https://github.com/tomhoma/conan.git
+cd conan
 cargo build --release
 ```
 
-The binary will be available at `target/release/gosearch`
+The binary will be available at `target/release/conan`
 
 ## Usage
 
@@ -49,24 +51,46 @@ The binary will be available at `target/release/gosearch`
 
 ```bash
 # Search for a username
-gosearch -u username
+cargo run -- -u username
 
 # Or use positional argument
-gosearch username
+cargo run -- username
 ```
 
 ### Advanced Options
 
 ```bash
 # Exclude false positives
-gosearch -u username --no-false-positives
+cargo run -- -u username --no-false-positives
 
 # Include Breach Directory search with API key
-gosearch -u username -b YOUR_API_KEY
+cargo run -- -u username -b "YOUR_API_KEY"
 
 # Or use long form
-gosearch -u username --breach-directory YOUR_API_KEY
+cargo run -- -u username --breach-directory "YOUR_API_KEY"
 ```
+
+## Breach Directory Integration
+
+Conan can search [Breach Directory](https://rapidapi.com/rohan-patra/api/breachdirectory) for compromised passwords associated with usernames. This requires an API key:
+
+### Getting an API Key
+1. Visit [RapidAPI - Breach Directory](https://rapidapi.com/rohan-patra/api/breachdirectory)
+2. Sign up for an account and subscribe to the API
+3. Copy your API key from the dashboard
+
+### Usage with Breach Directory
+```bash
+cargo run -- -u username -b "your-api-key"
+```
+
+### How It Works
+- **Verified Results**: Shows profiles Conan is confident exist on websites
+- **Password Hash Cracking**: Automatically attempts to crack found hashes using [Weakpass](https://weakpass.com)
+- **High Success Rate**: Nearly 100% crack rate due to Weakpass's extensive wordlist
+- **Multiple Sources**: Also searches HudsonRock, ProxyNova, and domain registrations regardless of Breach Directory usage
+
+The tool will search all standard sources plus Breach Directory when an API key is provided, giving you the most comprehensive results possible.
 
 ### Command Line Options
 
@@ -88,14 +112,12 @@ The tool provides:
 ## Project Structure
 
 ```
-gosearch-rust/
+conan/
 ├── Cargo.toml          # Project configuration
 ├── src/
 │   ├── main.rs         # Main application entry point
 │   ├── lib.rs          # Library module exports
-│   ├── models.rs       # Data structures
-│   ├── breach_directory.rs  # Breach Directory API client
-│   └── utils.rs        # Utility functions
+│   └── models.rs       # Data structures and API responses
 └── README.md           # This file
 ```
 ## Differences from Go Version
