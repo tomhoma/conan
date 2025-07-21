@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use clap::Parser;
 use colored::*;
@@ -6,7 +6,6 @@ use comfy_table::{Table, Cell, Attribute};
 use futures::stream::{FuturesUnordered, StreamExt};
 use once_cell::sync::Lazy;
 use reqwest::{Client, StatusCode, header::USER_AGENT};
-use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::sync::atomic::{AtomicU32, Ordering};
