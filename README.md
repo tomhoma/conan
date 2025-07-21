@@ -19,6 +19,10 @@ A Rust port of the GoSearch tool for searching usernames across various websites
 - **Terminal UI**: Color-coded output with table formatting
 - **File Output**: Saves results to `username.txt`
 
+
+## License
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
+
 ## Installation
 
 ### Prerequisites
@@ -167,11 +171,7 @@ Contributions are welcome! Please ensure:
 2. Tests pass (`cargo test`)
 3. Format code (`cargo fmt`)
 
-## License
+## Attribution
 
-This project maintains the same license as the original GoSearch project.
-
-## Acknowledgments
-
-- Original GoSearch project by ibnaleem https://github.com/ibnaleem/gosearch
-- All contributors to the dependencies used
+This project is a Rust port of [GoSearch](https://github.com/ibnaleem/gosearch), 
+which is licensed under GPL-3.0. We thank the original authors for their work.
