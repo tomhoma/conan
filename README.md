@@ -170,5 +170,5 @@ This project maintains the same license as the original GoSearch project.
 
 ## Acknowledgments
 
-- Original GoSearch project by ibnaleem
+- Original GoSearch project by ibnaleem https://github.com/ibnaleem/gosearch
 - All contributors to the dependencies used
