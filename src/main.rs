@@ -95,7 +95,7 @@ async fn main() -> Result<()> {
     let username = args.username
         .or(args.positional_username)
         .unwrap_or_else(|| {
-            eprintln!("Usage: conan -u <username>\nIssues: https://github.com/ibnaleem/gosearch/issues");
+            eprintln!("Usage: conan -u <username>");
             std::process::exit(1);
         });
 
