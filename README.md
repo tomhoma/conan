@@ -23,8 +23,11 @@ A Rust port of the GoSearch tool for searching usernames across various websites
 
 ### Prerequisites
 
-- Rust 1.70 or higher
-- Cargo
+- Rust 1.70 or higher + Cargo
+https://www.rust-lang.org/tools/install
+
+### Install build from Source
+```cargo install --git https://github.com/tomhoma/conan.git```
 
 ### Build from Source
 
