@@ -47,27 +47,37 @@ The binary will be available at `target/release/conan`
 
 ## Usage
 
-### Basic Usage
+### After Installation (Recommended)
+
+Once installed with `cargo install`, use the `conan` command directly:
+
+```bash
+# Search for a username
+conan -u username
+
+# Or use positional argument
+conan username
+
+# Exclude false positives
+conan -u username --no-false-positives
+
+# Include Breach Directory search with API key
+conan -u username -b "YOUR_API_KEY"
+
+# Or use long form
+conan -u username --breach-directory "YOUR_API_KEY"
+```
+
+### Development Usage
+
+When working in the project directory without installing:
 
 ```bash
 # Search for a username
 cargo run -- -u username
 
-# Or use positional argument
-cargo run -- username
-```
-
-### Advanced Options
-
-```bash
-# Exclude false positives
-cargo run -- -u username --no-false-positives
-
-# Include Breach Directory search with API key
+# With API key
 cargo run -- -u username -b "YOUR_API_KEY"
-
-# Or use long form
-cargo run -- -u username --breach-directory "YOUR_API_KEY"
 ```
 
 ## Breach Directory Integration
@@ -81,6 +91,10 @@ Conan can search [Breach Directory](https://rapidapi.com/rohan-patra/api/breachd
 
 ### Usage with Breach Directory
 ```bash
+# After installation
+conan -u username -b "your-api-key"
+
+# Development
 cargo run -- -u username -b "your-api-key"
 ```
 
