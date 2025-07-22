@@ -33,8 +33,9 @@ use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 use tokio::time::timeout;
 
-// Import models from the models module
+// Import models and modules
 use conan::models::*;
+use conan::breach_directory::BreachDirectoryClient;
 
 const ASCII_LOGO: &str = r#"
  ________   ________   ________    ________   ________      
@@ -170,7 +171,8 @@ async fn main() -> Result<()> {
     // Search Breach Directory if API key provided
     if let Some(api_key) = args.breach_directory_api_key {
         println!("\n");
-        if let Err(e) = search_breach_directory(&username, &api_key, &file_mutex).await {
+        let breach_client = BreachDirectoryClient::new(api_key, HTTP_CLIENT.clone());
+        if let Err(e) = breach_client.search(&username, &file_mutex).await {
             eprintln!("{} {}", "Error searching Breach Directory:".red(), e);
         }
     }
@@ -600,139 +602,7 @@ async fn search_proxy_nova(
     Ok(())
 }
 
-async fn crack_hash(hash: &str) -> Result<String> {
-    let url = format!("https://weakpass.com/api/v1/search/{}.json", hash);
-    
-    let request = HTTP_CLIENT.get(&url)
-        .header("User-Agent", DEFAULT_USER_AGENT)
-        .header("Accept", "application/json");
-    
-    match timeout(Duration::from_secs(15), request.send()).await {
-        Ok(Ok(response)) => {
-            if response.status().is_success() {
-                match response.json::<WeakpassResponse>().await {
-                    Ok(weakpass_response) => Ok(weakpass_response.pass),
-                    Err(_) => Ok(String::new()),
-                }
-            } else {
-                Ok(String::new())
-            }
-        }
-        _ => Ok(String::new()),
-    }
-}
 
-async fn search_breach_directory(
-    username: &str,
-    api_key: &str,
-    file_mutex: &Arc<Mutex<()>>,
-) -> Result<()> {
-    println!("{}", format!("[*] Searching {} on Breach Directory for any compromised passwords...", username).yellow());
-    
-    // Construct API URL for RapidAPI Breach Directory
-    let url = format!("https://breachdirectory.p.rapidapi.com/?func=auto&term={}", username);
-    
-    let request = HTTP_CLIENT.get(&url)
-        .header("x-rapidapi-key", api_key)
-        .header("x-rapidapi-host", "breachdirectory.p.rapidapi.com")
-        .header("User-Agent", DEFAULT_USER_AGENT);
-    
-    match timeout(Duration::from_secs(30), request.send()).await {
-        Ok(Ok(response)) => {
-            if !response.status().is_success() {
-                println!("{}", format!("[-] API request failed with status: {}", response.status()).red());
-                return Ok(());
-            }
-            
-            // Parse JSON response and properly handle breach data
-            match response.json::<BreachDirectoryResponse>().await {
-                Ok(breach_response) => {
-                    if !breach_response.success {
-                        println!("{}", format!("[-] Breach Directory API returned error").red());
-                        return Ok(());
-                    }
-                    
-                    if breach_response.found == 0 {
-                        println!("{}", format!("[-] No breaches found for {}.", username).red());
-                        write_to_file(username, &format!("[-] No breaches found on Breach Directory for: {}", username), file_mutex)?;
-                        return Ok(());
-                    }
-                    
-                    // Display found breaches
-                    println!("{}", format!("[+] Found {} breaches for {}:", breach_response.found, username).green());
-                    
-                    let mut table = Table::new();
-                    table.load_preset(comfy_table::presets::UTF8_FULL);
-                    table.set_header(vec!["#", "Email", "Password", "Hash", "Sources"]);
-                    
-                    let mut file_content = String::new();
-                    file_content.push_str(&format!("[+] Found {} breaches for {}\n", breach_response.found, username));
-                    
-                    for (i, entry) in breach_response.result.iter().enumerate() {
-                        let mut cracked_password = String::new();
-                        
-                        // *** THIS IS WHERE crack_hash IS CALLED ***
-                        // Attempt to crack hash if available
-                        if let Some(hash) = &entry.hash {
-                            if !hash.is_empty() {
-                                println!("{}", format!("[*] Attempting to crack hash: {}...", &hash[..8.min(hash.len())]).yellow());
-                                match crack_hash(hash).await {
-                                    Ok(pass) if !pass.is_empty() => {
-                                        cracked_password = pass;
-                                        println!("{}", format!("[+] Hash cracked successfully!").green());
-                                    }
-                                    _ => {
-                                        println!("{}", format!("[-] Unable to crack hash").red());
-                                    }
-                                }
-                            }
-                        }
-                        
-                        // Use cracked password if available, otherwise use stored password
-                        let display_password = if !cracked_password.is_empty() {
-                            format!("{} (cracked)", cracked_password)
-                        } else if let Some(password) = &entry.password {
-                            password.clone()
-                        } else {
-                            "N/A".to_string()
-                        };
-                        
-                        table.add_row(vec![
-                            Cell::new(i + 1),
-                            Cell::new(entry.email.as_deref().unwrap_or("N/A")),
-                            Cell::new(&display_password),
-                            Cell::new(entry.hash.as_deref().unwrap_or("N/A")),
-                            Cell::new(&entry.sources),
-                        ]);
-                        
-                        // Add to file content
-                        file_content.push_str(&format!("[-] Breach #{}\n", i + 1));
-                        file_content.push_str(&format!(":: Email: {}\n", entry.email.as_deref().unwrap_or("N/A")));
-                        file_content.push_str(&format!(":: Password: {}\n", display_password));
-                        file_content.push_str(&format!(":: Hash: {}\n", entry.hash.as_deref().unwrap_or("N/A")));
-                        file_content.push_str(&format!(":: SHA1: {}\n", entry.sha1.as_deref().unwrap_or("N/A")));
-                        file_content.push_str(&format!(":: Sources: {}\n", entry.sources));
-                        file_content.push_str("\n");
-                    }
-                    
-                    println!("{}", table);
-                    write_to_file(username, &file_content, file_mutex)?;
-                }
-                Err(e) => {
-                    println!("{}", format!("[-] Error parsing Breach Directory response: {}", e).red());
-                }
-            }
-        }
-        Ok(Err(e)) => {
-            println!("{}", format!("[-] Error searching Breach Directory: {}", e).red());
-        }
-        Err(_) => {
-            println!("{}", format!("[-] Breach Directory request timed out").red());
-        }
-    }
-    
-    Ok(())
-}
 
 fn build_domains(username: &str) -> Vec<String> {
     let tlds = vec![
