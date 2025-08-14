@@ -38,6 +38,10 @@ env_logger = "0.11"
 once_cell = "1.20"  # For lazy static HTTP client
 futures = "0.3"     # For FuturesUnordered
 
+# Web server for UI
+actix-web = "4.5"
+actix-files = "0.6"
+
 [profile.release]
 lto = "fat"
 codegen-units = 1
@@ -45,5 +49,6 @@ strip = true
 panic = "abort"
 opt-level = 3
 
-[profile.release.package."*"]
-opt-level = 3
+
+[features]
+web = []
