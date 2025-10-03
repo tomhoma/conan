@@ -25,8 +25,7 @@ use comfy_table::{Table, Cell, Attribute};
 use futures::stream::{FuturesUnordered, StreamExt};
 use once_cell::sync::Lazy;
 use reqwest::{Client, StatusCode, header::USER_AGENT};
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -36,6 +35,7 @@ use tokio::time::timeout;
 // Import models and modules
 use conan::models::*;
 use conan::breach_directory::BreachDirectoryClient;
+use conan::utils::write_to_file;
 
 const ASCII_LOGO: &str = r#"
  ________   ________   ________    ________   ________      
@@ -123,7 +123,7 @@ async fn main() -> Result<()> {
     delete_old_file(&username);
     
     // Load website data
-    let data = match load_website_data().await {
+    let data = match load_website_data() {
         Ok(data) => data,
         Err(e) => {
             eprintln!("{} {}", "Error loading website data:".red(), e);
@@ -221,15 +221,9 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn load_website_data() -> Result<Data> {
-    let url = "https://raw.githubusercontent.com/ibnaleem/gosearch/refs/heads/main/data.json";
-    let response = HTTP_CLIENT.get(url).send().await?;
-    
-    if !response.status().is_success() {
-        anyhow::bail!("Failed to download data.json, status code: {}", response.status());
-    }
-    
-    let data: Data = response.json().await?;
+fn load_website_data() -> Result<Data> {
+    let data_str = include_str!("data.json");
+    let data: Data = serde_json::from_str(data_str)?;
     Ok(data)
 }
 
@@ -318,24 +312,21 @@ async fn check_by_status_code_optimized(
     let request = client.head(url);
     let request = add_headers_and_cookies(request, website);
     
-    match timeout(Duration::from_secs(15), request.send()).await {
-        Ok(Ok(response)) => {
-            if response.status().as_u16() < 400 {
-                let should_mark_found = if let Some(error_code) = website.error_code {
-                    response.status().as_u16() != error_code
-                } else {
-                    true
-                };
-                
-                if should_mark_found {
-                    let display_url = build_url(&website.base_url, username);
-                    println!("{} {} {}", "[+]".green(), website.name, display_url);
-                    write_to_file(username, &format!("{}\n", display_url), file_mutex)?;
-                    PROFILE_COUNT.fetch_add(1, Ordering::Relaxed);
-                }
-            }
+    let response = timeout(Duration::from_secs(15), request.send()).await??;
+
+    if response.status().as_u16() < 400 {
+        let should_mark_found = if let Some(error_code) = website.error_code {
+            response.status().as_u16() != error_code
+        } else {
+            true
+        };
+
+        if should_mark_found {
+            let display_url = build_url(&website.base_url, username);
+            println!("{} {} {}", "[+]".green(), website.name, display_url);
+            write_to_file(username, &format!("{}\n", display_url), file_mutex)?;
+            PROFILE_COUNT.fetch_add(1, Ordering::Relaxed);
         }
-        _ => {}
     }
     
     Ok(())
@@ -357,42 +348,39 @@ async fn check_by_error_msg_optimized(
     let request = client.get(url);
     let request = add_headers_and_cookies(request, website);
     
-    match timeout(Duration::from_secs(15), request.send()).await {
-        Ok(Ok(mut response)) => {
-            if response.status().as_u16() < 400 {
-                if let Some(error_msg) = &website.error_msg {
-                    // Stream response and check for error message early
-                    let mut buffer = Vec::with_capacity(8192);
-                    let mut found_error = false;
-                    
-                    while let Ok(Some(chunk)) = response.chunk().await {
-                        buffer.extend_from_slice(&chunk);
-                        
-                        // Try to convert to string and check for error message
-                        if let Ok(text) = std::str::from_utf8(&buffer) {
-                            if text.contains(error_msg) {
-                                found_error = true;
-                                break;
-                            }
-                        }
-                        
-                        // Stop reading after 64KB to avoid downloading huge pages
-                        if buffer.len() > 65536 {
-                            break;
-                        }
-                    }
-                    
-                    // If we didn't find the error message, the profile exists
-                    if !found_error {
-                        let display_url = build_url(&website.base_url, username);
-                        println!("{} {} {}", "[+]".green(), website.name, display_url);
-                        write_to_file(username, &format!("{}\n", display_url), file_mutex)?;
-                        PROFILE_COUNT.fetch_add(1, Ordering::Relaxed);
+    let mut response = timeout(Duration::from_secs(15), request.send()).await??;
+
+    if response.status().as_u16() < 400 {
+        if let Some(error_msg) = &website.error_msg {
+            // Stream response and check for error message early
+            let mut buffer = Vec::with_capacity(8192);
+            let mut found_error = false;
+
+            while let Some(chunk) = response.chunk().await? {
+                buffer.extend_from_slice(&chunk);
+
+                // Try to convert to string and check for error message
+                if let Ok(text) = std::str::from_utf8(&buffer) {
+                    if text.contains(error_msg) {
+                        found_error = true;
+                        break;
                     }
                 }
+
+                // Stop reading after 64KB to avoid downloading huge pages
+                if buffer.len() > 65536 {
+                    break;
+                }
+            }
+
+            // If we didn't find the error message, the profile exists
+            if !found_error {
+                let display_url = build_url(&website.base_url, username);
+                println!("{} {} {}", "[+]".green(), website.name, display_url);
+                write_to_file(username, &format!("{}\n", display_url), file_mutex)?;
+                PROFILE_COUNT.fetch_add(1, Ordering::Relaxed);
             }
         }
-        _ => {}
     }
     
     Ok(())
@@ -414,20 +402,17 @@ async fn check_by_profile_presence(
     let request = client.get(url);
     let request = add_headers_and_cookies(request, website);
     
-    match timeout(Duration::from_secs(15), request.send()).await {
-        Ok(Ok(response)) => {
-            if response.status().as_u16() < 400 {
-                if let Some(error_msg) = &website.error_msg {
-                    let body = response.text().await.unwrap_or_default();
-                    if body.contains(error_msg) {
-                        println!("{} {} {}", "[+]".green(), website.name, url);
-                        write_to_file(username, &format!("{}\n", url), file_mutex)?;
-                        PROFILE_COUNT.fetch_add(1, Ordering::Relaxed);
-                    }
-                }
+    let response = timeout(Duration::from_secs(15), request.send()).await??;
+
+    if response.status().as_u16() < 400 {
+        if let Some(error_msg) = &website.error_msg {
+            let body = response.text().await?;
+            if body.contains(error_msg) {
+                println!("{} {} {}", "[+]".green(), website.name, url);
+                write_to_file(username, &format!("{}\n", url), file_mutex)?;
+                PROFILE_COUNT.fetch_add(1, Ordering::Relaxed);
             }
         }
-        _ => {}
     }
     
     Ok(())
@@ -449,23 +434,20 @@ async fn check_by_response_url(
     let request = client.get(url);
     let request = add_headers_and_cookies(request, website);
     
-    match timeout(Duration::from_secs(15), request.send()).await {
-        Ok(Ok(response)) => {
-            if response.status().as_u16() < 400 {
-                if let Some(response_url_template) = &website.response_url {
-                    let expected_url = build_url(response_url_template, username);
-                    let actual_url = response.url().to_string();
-                    
-                    if actual_url != expected_url {
-                        let display_url = build_url(&website.base_url, username);
-                        println!("{} {} {}", "[+]".green(), website.name, display_url);
-                        write_to_file(username, &format!("{}\n", display_url), file_mutex)?;
-                        PROFILE_COUNT.fetch_add(1, Ordering::Relaxed);
-                    }
-                }
+    let response = timeout(Duration::from_secs(15), request.send()).await??;
+
+    if response.status().as_u16() < 400 {
+        if let Some(response_url_template) = &website.response_url {
+            let expected_url = build_url(response_url_template, username);
+            let actual_url = response.url().to_string();
+
+            if actual_url != expected_url {
+                let display_url = build_url(&website.base_url, username);
+                println!("{} {} {}", "[+]".green(), website.name, display_url);
+                write_to_file(username, &format!("{}\n", display_url), file_mutex)?;
+                PROFILE_COUNT.fetch_add(1, Ordering::Relaxed);
             }
         }
-        _ => {}
     }
     
     Ok(())
@@ -703,19 +685,6 @@ fn add_headers_and_cookies(mut request: reqwest::RequestBuilder, website: &Websi
 
 fn build_url(base_url: &str, username: &str) -> String {
     base_url.replace("{}", username)
-}
-
-fn write_to_file(username: &str, content: &str, file_mutex: &Arc<Mutex<()>>) -> Result<()> {
-    let _guard = file_mutex.lock().map_err(|e| anyhow::anyhow!("Failed to acquire file mutex lock: {}", e))?;
-    
-    let filename = format!("{}.txt", username);
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&filename)?;
-    
-    writeln!(file, "{}", content)?;
-    Ok(())
 }
 
 fn delete_old_file(username: &str) {
