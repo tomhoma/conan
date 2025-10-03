@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conan OSINT</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Conan OSINT</h1>
+            <p>Search for usernames across the web.</p>
+        </header>
+        <main>
+            <div class="search-section">
+                <input type="text" id="username" placeholder="Enter username...">
+                <input type="text" id="apiKey" placeholder="Enter BreachDirectory API Key (Optional)">
+                <button id="search-btn">Search</button>
+            </div>
+            <div class="api-key-info">
+                <h3>How to get a Breach Directory API Key</h3>
+                <p>To search for compromised credentials, you can get a free API key from <a href="https://rapidapi.com/rohan-patra/api/breachdirectory" target="_blank">RapidAPI</a>.</p>
+                <ol>
+                    <li>Visit the Breach Directory page on RapidAPI.</li>
+                    <li>Sign up for a free account.</li>
+                    <li>Subscribe to the "Basic" plan (it's free).</li>
+                    <li>You will find your API key on the API endpoints page.</li>
+                </ol>
+            </div>
+            <div id="results">
+                <h2>Results</h2>
+                <div id="results-content"></div>
+            </div>
+        </main>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>

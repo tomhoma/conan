@@ -5,6 +5,7 @@ A Rust port of the GoSearch tool for searching usernames across various websites
 ## Features
 
 - **Username Search**: Search for usernames across multiple websites simultaneously
+- **Web UI**: A modern, minimal web interface to run searches from your browser.
 - **Concurrent Execution**: Uses Tokio for async/concurrent operations
 - **Compromised Credential Checking**:
   - HudsonRock's Cybercrime Intelligence Database
@@ -47,7 +48,7 @@ The binary will be available at `target/release/conan`
 
 ## Usage
 
-### After Installation (Recommended)
+### CLI Usage
 
 Once installed with `cargo install`, use the `conan` command directly:
 
@@ -68,6 +69,14 @@ conan -u username -b "YOUR_API_KEY"
 conan -u username --breach-directory "YOUR_API_KEY"
 ```
 
+### Web UI Usage
+
+To start the web interface, run:
+```bash
+conan --web
+```
+Then, open your browser and navigate to `http://127.0.0.1:8080`.
+
 ### Development Usage
 
 When working in the project directory without installing:
@@ -78,6 +87,9 @@ cargo run -- -u username
 
 # With API key
 cargo run -- -u username -b "YOUR_API_KEY"
+
+# Start the web server
+cargo run -- --web
 ```
 
 ## Breach Directory Integration
@@ -97,6 +109,7 @@ conan -u username -b "your-api-key"
 # Development
 cargo run -- -u username -b "your-api-key"
 ```
+The web UI also provides a field to enter your API key.
 
 ### How It Works
 - **Verified Results**: Shows profiles Conan is confident exist on websites
@@ -111,6 +124,7 @@ The tool will search all standard sources plus Breach Directory when an API key 
 - `-u, --username <USERNAME>`: Username to search
 - `--no-false-positives`: Do not show unverified results
 - `-b, --breach-directory <API_KEY>`: Search Breach Directory with API key
+- `--web`: Start the web server
 - `-h, --help`: Print help information
 - `-V, --version`: Print version information
 
@@ -122,6 +136,7 @@ The tool provides:
    - Yellow `[?]`: Possible profile (unverified)
    - Red `[-]`: No profile or error
 2. **File Output**: Results saved to `username.txt`
+3. **Web UI**: Results are displayed in the browser.
 
 ## Project Structure
 
@@ -131,7 +146,15 @@ conan/
 ├── src/
 │   ├── main.rs         # Main application entry point
 │   ├── lib.rs          # Library module exports
-│   └── models.rs       # Data structures and API responses
+│   ├── models.rs       # Data structures and API responses
+│   ├── search.rs       # Core search logic
+│   └── web/            # Web server and UI
+│       ├── mod.rs
+│       ├── server.rs
+│       └── static/
+│           ├── index.html
+│           ├── style.css
+│           └── script.js
 └── README.md           # This file
 ```
 ## Differences from Go Version
@@ -187,7 +210,7 @@ This Rust implementation maintains feature parity with the original Go version w
 cargo build --release --target x86_64-unknown-linux-gnu
 
 # Windows
-cargo build --release --target x86_64-pc-windows-msvc
+cargo build --release --target x86__64-pc-windows-msvc
 
 # macOS
 cargo build --release --target x86_64-apple-darwin
