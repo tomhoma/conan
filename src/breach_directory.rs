@@ -7,6 +7,7 @@ use std::time::Duration;
 use tokio::time::timeout;
 
 use crate::models::{BreachDirectoryResponse, WeakpassResponse};
+use crate::utils::write_to_file;
 
 const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 
@@ -48,7 +49,7 @@ impl BreachDirectoryClient {
                         
                         if breach_response.found == 0 {
                             println!("{}", format!("[-] No breaches found for {}.", username).red());
-                            self.write_to_file(username, &format!("[-] No breaches found on Breach Directory for: {}", username), file_mutex)?;
+                            write_to_file(username, &format!("[-] No breaches found on Breach Directory for: {}", username), file_mutex)?;
                             return Ok(());
                         }
                         
@@ -109,7 +110,7 @@ impl BreachDirectoryClient {
                         }
                         
                         println!("{}", table);
-                        self.write_to_file(username, &file_content, file_mutex)?;
+                        write_to_file(username, &file_content, file_mutex)?;
                     }
                     Err(e) => {
                         println!("{}", format!("[-] Error parsing Breach Directory response: {}", e).red());
@@ -149,19 +150,4 @@ impl BreachDirectoryClient {
         }
     }
     
-    fn write_to_file(&self, username: &str, content: &str, file_mutex: &Arc<Mutex<()>>) -> Result<()> {
-        use std::fs::OpenOptions;
-        use std::io::Write;
-        
-        let _guard = file_mutex.lock().map_err(|e| anyhow::anyhow!("Failed to acquire file mutex lock: {}", e))?;
-        
-        let filename = format!("{}.txt", username);
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&filename)?;
-        
-        writeln!(file, "{}", content)?;
-        Ok(())
-    }
 }
