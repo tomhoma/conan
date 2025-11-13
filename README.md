@@ -20,6 +20,28 @@ A Rust port of the GoSearch tool for searching usernames across various websites
 - **Terminal UI**: Color-coded output with table formatting
 - **File Output**: Saves results to `username.txt`
 
+## 🆕 Recent Improvements
+
+See [IMPROVEMENTS.md](IMPROVEMENTS.md) for detailed documentation of recent enhancements:
+
+### Bug Fixes
+- ✅ Fixed PROFILE_COUNT not resetting between searches
+- ✅ Added comprehensive input validation
+- ✅ Improved error handling with guaranteed cleanup
+- ✅ Created sample data.json generator
+
+### New Features
+- 🚀 **Batch Username Search** - Search multiple usernames at once
+- 🏥 **Health Check Endpoint** - `/health` and `/status` endpoints
+- 📊 **JSON/CSV Export Module** - Foundation for structured data export
+- 💅 **Enhanced Web UI** - Loading states, tabs, better error messages
+- 🎨 **Modern Design** - Responsive layout with smooth animations
+
+### API Endpoints
+- `POST /search` - Single username search
+- `POST /batch-search` - Multiple username search
+- `GET /health` - Server health check
+- `GET /status` - Detailed server status
 
 ## License
 This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
