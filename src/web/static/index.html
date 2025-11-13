@@ -13,11 +13,26 @@
             <p>Search for usernames across the web.</p>
         </header>
         <main>
-            <div class="search-section">
-                <input type="text" id="username" placeholder="Enter username...">
-                <input type="text" id="apiKey" placeholder="Enter BreachDirectory API Key (Optional)">
-                <button id="search-btn">Search</button>
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="single">Single Search</button>
+                <button class="tab-btn" data-tab="batch">Batch Search</button>
             </div>
+
+            <div class="tab-content active" id="single-tab">
+                <div class="search-section">
+                    <input type="text" id="username" placeholder="Enter username...">
+                    <input type="text" id="apiKey" placeholder="Enter BreachDirectory API Key (Optional)">
+                    <button id="search-btn">Search</button>
+                </div>
+            </div>
+
+            <div class="tab-content" id="batch-tab">
+                <div class="search-section">
+                    <textarea id="batch-usernames" placeholder="Enter usernames (one per line)...&#10;example1&#10;example2&#10;example3" rows="6"></textarea>
+                    <button id="batch-search-btn">Search All</button>
+                </div>
+            </div>
+
             <div class="api-key-info">
                 <h3>How to get a Breach Directory API Key</h3>
                 <p>To search for compromised credentials, you can get a free API key from <a href="https://rapidapi.com/rohan-patra/api/breachdirectory" target="_blank">RapidAPI</a>.</p>
@@ -28,11 +43,31 @@
                     <li>You will find your API key on the API endpoints page.</li>
                 </ol>
             </div>
+
+            <div id="loading" style="display: none;">
+                <div class="spinner"></div>
+                <p>Searching... Please wait</p>
+            </div>
+
             <div id="results">
                 <h2>Results</h2>
                 <div id="results-content"></div>
             </div>
         </main>
+        <script>
+            // Tab switching
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const tab = btn.dataset.tab;
+
+                    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+                    btn.classList.add('active');
+                    document.getElementById(tab + '-tab').classList.add('active');
+                });
+            });
+        </script>
     </div>
     <script src="script.js"></script>
 </body>
